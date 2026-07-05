@@ -9,27 +9,22 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      
-      - name: Download and Install Tailscale
+      # 1. تثبيت تايل سكيل عبر مدير حزم ويندوز المدمج (Choco) - سريع ومستقر جداً
+      - name: Install Tailscale via Chocolatey
         shell: powershell
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          echo "Downloading Tailscale..."
-          
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.msi" -OutFile "tailscale.msi"
-          echo "Installing Tailscale..."
-          Start-Process msiexec.exe -ArgumentList '/i tailscale.msi /qn /norestart' -Wait
-          echo "Tailscale installed successfully!"
+          choco install tailscale -y
 
-      
+      # 2. الربط بالشبكة (انتظار 5 ثوانٍ ليتفعل مسار البرنامج في الويندوز)
       - name: Connect to Tailscale Network
         shell: powershell
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
+          Start-Sleep -Seconds 5
           & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
 
-      
+      # 3. إعداد الـ RDP والمستخدم
       - name: Enable RDP and Setup User
         shell: powershell
         run: |
@@ -39,7 +34,7 @@ jobs:
           $Password = ConvertTo-SecureString "GitHubRDP@2026" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
 
-      
+      # 4. الحفاظ على تشغيل السيرفر
       - name: Keep Alive Loop
         shell: powershell
         run: |
