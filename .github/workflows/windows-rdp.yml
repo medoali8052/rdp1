@@ -2,20 +2,22 @@ name: Free Windows RDP via Tailscale
 
 on:
   workflow_dispatch:
+  # تم إضافة خيار التشغيل التلقائي عبر الـ API
+  repository_dispatch:
+    types: [rerun_rdp]
 
 jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 360
-
     steps:
-      # 1. تثبيت تايل سكيل عبر مدير حزم ويندوز المدمج (Choco) - سريع ومستقر جداً
+      # 1. تثبيت تايل سكيل عبر مدير حزم ويندوز المدمج (Choco)
       - name: Install Tailscale via Chocolatey
         shell: powershell
         run: |
           choco install tailscale -y
 
-      # 2. الربط بالشبكة (انتظار 5 ثوانٍ ليتفعل مسار البرنامج في الويندوز)
+      # 2. الربط بالشبكة
       - name: Connect to Tailscale Network
         shell: powershell
         env:
@@ -34,11 +36,29 @@ jobs:
           $Password = ConvertTo-SecureString "GitHubRDP@2026" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
 
-      # 4. الحفاظ على تشغيل السيرفر
+      # 4. الحفاظ على تشغيل السيرفر (تم تقليل الوقت إلى 5 ساعات و50 دقيقة لتفادي الإغلاق المفاجئ)
       - name: Keep Alive Loop
         shell: powershell
         run: |
-          $hours = 6
-          for ($i = 0; $i -lt ($hours * 60); $i++) {
+          $minutes = 350
+          for ($i = 0; $i -lt $minutes; $i++) {
               Start-Sleep -Seconds 60
           }
+
+      # 5. خطوة استدعاء التشغيل القادم تلقائياً قبل إغلاق السيرفر الحالي
+      - name: Trigger Next Run
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $url = "https://api.github.com/repos/$repo/dispatches"
+          $headers = @{
+              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "Accept"        = "application/vnd.github.v3+json"
+          }
+          $body = @{
+              "event_type" = "rerun_rdp"
+          } | ConvertTo-Json
+          
+          Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/json"
