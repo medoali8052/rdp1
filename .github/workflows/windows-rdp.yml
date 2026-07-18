@@ -19,12 +19,15 @@ jobs:
       - name: Connect to Tailscale
         shell: powershell
         run: |
-          # تثبيت تايل سكيل عبر Chocolatey
+          Write-Host "Installing Tailscale via Chocolatey..."
           choco install tailscale -y
           
-          # تشغيل الخدمة وتجلب تسجيل الدخول
-          # استبدل الحرف المساعد بالـ Auth Key الخاص بك لو أردت أتمتة كاملة
-          tailscale up --authkey="${{ secrets.TAILSCALE_AUTHKEY }}" --accept-routes
+          # تحديث الـ PATH الحالي للجلسة فوراً ليتعرف على التثبيت الجديد
+          $env:Path += ";C:\Program Files\Tailscale"
+          
+          Write-Host "Connecting to Tailscale..."
+          # استخدام المسار المباشر لـ Tailscale لتفادي خطأ عدم التعرف على الأمر
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTHKEY }}" --accept-routes
           
           Write-Host "Tailscale connected successfully!"
 
@@ -44,10 +47,6 @@ jobs:
           Write-Host "Installing Google Chrome and WinRAR..."
           choco install googlechrome -y
           choco install winrar -y
-          
-          # ملاحظة: تم إزالة تثبيت تطبيق Mysterium كمشغل كامل للجهاز 
-          # لمنع سحب الاتصال من تايل سكيل وفصل الـ RDP.
-          # يفضل تثبيته كـ Extension يدويًا داخل الكروم عند الدخول.
 
       # 5. إبقاء السيرفر حياً والانتظار (Loop)
       - name: Keep RDP Alive Loop
@@ -66,8 +65,9 @@ jobs:
           $repo = "${{ github.repository }}"
           $url = "https://api.github.com/repos/$repo/dispatches"
           
+          # استخدام GITHUB_TOKEN الافتراضي الموثوق لحل خطأ 403
           $headers = @{
-              "Authorization" = "Bearer ${{ secrets.GH_PAT_TOKEN }}"
+              "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
               "Accept"        = "application/vnd.github.v3+json"
           }
           
@@ -75,7 +75,6 @@ jobs:
               "event_type" = "rerun_rdp"
           } | ConvertTo-Json
           
-          # تم تصحيح المسافة هنا قبل $headers وقبل $body
           Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/json"
           Write-Host "Triggered next workflow run successfully."
 
@@ -88,13 +87,12 @@ jobs:
           $run_id = "${{ github.run_id }}"
           $url = "https://api.github.com/repos/$repo/actions/runs/$run_id"
           
+          # استخدام GITHUB_TOKEN الافتراضي الموثوق لحل خطأ 403
           $headers = @{
-              "Authorization" = "Bearer ${{ secrets.GH_PAT_TOKEN }}"
+              "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
               "Accept"        = "application/vnd.github.v3+json"
           }
           
           Write-Host "Deleting workflow run $run_id to keep history clean..."
-          
-          # تم تصحيح المسافة هنا قبل $headers
           Invoke-RestMethod -Uri $url -Method Delete -Headers $headers
           Write-Host "Current workflow run deleted."
