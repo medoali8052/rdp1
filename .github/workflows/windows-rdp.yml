@@ -51,7 +51,7 @@ jobs:
       - name: Auto-Install My Tools & Apps
         shell: powershell
         run: |
-          echo "جاري تثبيت البرامج الأساسية تلقائياً..."
+          Write-Host "Installing Google Chrome and WinRAR..."
           choco install googlechrome -y
           choco install winrar -y
 
