@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. تثبيت وإعداد شبكة Tailscale وتفعيل الـ Exit Node إن لزم الأمر
+      # 2. تثبيت وإعداد شبكة Tailscale والربط التلقائي عبر الـ Auth Key
       - name: Connect to Tailscale
         shell: powershell
         run: |
@@ -25,11 +25,11 @@ jobs:
           # تحديث الـ PATH الحالي للجلسة فوراً ليتعرف على التثبيت الجديد
           $env:Path += ";C:\Program Files\Tailscale"
           
-          Write-Host "Connecting to Tailscale..."
-          # استخدام المسار المباشر لـ Tailscale لتفادي خطأ عدم التعرف على الأمر
+          Write-Host "Connecting to Tailscale using Auth Key..."
+          # استخدام المسار المباشر وتمرير الـ Key تلقائياً للربط الفوري بدون روابط
           & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="${{ secrets.TAILSCALE_AUTHKEY }}" --accept-routes
           
-          Write-Host "Tailscale connected successfully!"
+          Write-Host "Tailscale connected successfully via Auth Key!"
 
       # 3. إعداد ريموت ديسكتوب (RDP) داخل الويندوز للسماح بالاتصال
       - name: Configure Windows RDP
@@ -65,7 +65,6 @@ jobs:
           $repo = "${{ github.repository }}"
           $url = "https://api.github.com/repos/$repo/dispatches"
           
-          # استخدام GITHUB_TOKEN الافتراضي الموثوق لحل خطأ 403
           $headers = @{
               "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
               "Accept"        = "application/vnd.github.v3+json"
@@ -87,7 +86,6 @@ jobs:
           $run_id = "${{ github.run_id }}"
           $url = "https://api.github.com/repos/$repo/actions/runs/$run_id"
           
-          # استخدام GITHUB_TOKEN الافتراضي الموثوق لحل خطأ 403
           $headers = @{
               "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
               "Accept"        = "application/vnd.github.v3+json"
