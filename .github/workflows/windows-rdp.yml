@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write # إضافة صلاحية مسح الـ Actions تلقائياً
 
 jobs:
   build:
@@ -19,18 +20,14 @@ jobs:
         run: |
           choco install tailscale -y
 
-      # 2. الربط بالشبكة (تعديل لتفادي خطأ عدم التعرف على المسار)
+      # 2. الربط بالشبكة
       - name: Connect to Tailscale Network
         shell: powershell
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          # إعادة تحديث مسارات النظام في الجلسة الحالية ليقرأ التثبيت الجديد
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          
           Start-Sleep -Seconds 5
-          
-          # محاولة التشغيل عبر المسار الافتراضي المحدث أو المباشر
           if (Test-Path "C:\Program Files\Tailscale\tailscale.exe") {
               & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
           } else {
@@ -43,11 +40,10 @@ jobs:
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          
           $Password = ConvertTo-SecureString "GitHubRDP@2026" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
 
-      # 4. تثبيت أدواتك وبرامجك تلقائياً
+      # 4. تثبيت أدواتك وبرامجك تلقائياً (بالإنجليزية لتفادي خطأ الترميز)
       - name: Auto-Install My Tools & Apps
         shell: powershell
         run: |
@@ -79,5 +75,21 @@ jobs:
           $body = @{
               "event_type" = "rerun_rdp"
           } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/json"
+          Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body$body -ContentType "application/json"
+
+      # 7. [خطوة جديدة] مسح سجل التشغيل الحالي تلقائياً لتنظيف الصفحة
+      - name: Auto Delete Current Workflow Run
+        shell: powershell
+        if: always() # تعمل دائماً حتى لو حدث خطأ في الخطوات السابقة
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $run_id = "${{ github.run_id }}"
+          $url = "https://api.github.com/repos/$repo/actions/runs/$run_id"
+          $headers = @{
+              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "Accept"        = "application/vnd.github.v3+json"
+          }
+          Write-Host "Deleting workflow run $run_id to keep history clean..."
+          Invoke-RestMethod -Uri $url -Method Delete -Headers$headers
