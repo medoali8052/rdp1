@@ -19,7 +19,7 @@ jobs:
       - name: Connect to Tailscale
         shell: powershell
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }} # تم التعديل ليتطابق مع اسم السيكرت عندك
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           Write-Host "Installing Tailscale via Chocolatey..."
           choco install tailscale -y
@@ -27,19 +27,29 @@ jobs:
           $env:Path += ";C:\Program Files\Tailscale"
           
           Write-Host "Connecting to Tailscale using Auth Key..."
-          # تمرير المفتاح من متغير البيئة مباشرة للربط الفوري وتخطي الرابط
           & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --accept-routes
           
           Write-Host "Tailscale connected successfully!"
 
-      # 3. إعداد ريموت ديسكتوب (RDP) داخل الويندوز للسماح بالاتصال
+      # 3. إعداد ريموت ديسكتوب (RDP) لفتح بدون باسورد وتخطي الـ NLA
       - name: Configure Windows RDP
         shell: powershell
         run: |
+          # تفعيل الريموت ديسكتوب
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-          Write-Host "Windows RDP configuration completed."
+          
+          # 1. إيقاف الـ User Authentication (NLA) تمامًا لتخطي طلب الباسورد المسبق
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
+          
+          # 2. إزالة الباسورد الحالي لحساب runneradmin وجعله فارغًا
+          $Password = ConvertTo-SecureString "" -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $Password
+          
+          # 3. تعديل الريجستري للسماح بالدخول بحسابات بدون باسورد (LimitBlankPasswordUse = 0)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Lsa' -name "LimitBlankPasswordUse" -Value 0
+          
+          Write-Host "Windows RDP configured for Passwordless login. Username: runneradmin"
 
       # 4. تثبيت متصفح كروم وباقي الأدوات
       - name: Auto-Install My Tools & Apps
