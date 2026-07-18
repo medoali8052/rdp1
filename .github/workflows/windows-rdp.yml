@@ -1,95 +1,100 @@
-name: Free Windows RDP via Tailscale
+name: Windows RDP with Auto-Refresh
 
 on:
   workflow_dispatch:
   repository_dispatch:
     types: [rerun_rdp]
 
-permissions:
-  contents: write
-  actions: write # إضافة صلاحية مسح الـ Actions تلقائياً
-
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 360 # الجلسة ستستمر لمدة 6 ساعات كحد أقصى
+
     steps:
-      # 1. تثبيت تايل سكيل عبر مدير حزم ويندوز المدمج (Choco)
-      - name: Install Tailscale via Chocolatey
+      # 1. إعداد البيئة والتحقق من الملفات
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. تثبيت وإعداد شبكة Tailscale وتفعيل الـ Exit Node إن لزم الأمر
+      - name: Connect to Tailscale
         shell: powershell
         run: |
+          # تثبيت تايل سكيل عبر Chocolatey
           choco install tailscale -y
+          
+          # تشغيل الخدمة وتجلب تسجيل الدخول
+          # استبدل الحرف المساعد بالـ Auth Key الخاص بك لو أردت أتمتة كاملة
+          tailscale up --authkey="${{ secrets.TAILSCALE_AUTHKEY }}" --accept-routes
+          
+          Write-Host "Tailscale connected successfully!"
 
-      # 2. الربط بالشبكة
-      - name: Connect to Tailscale Network
-        shell: powershell
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-        run: |
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          Start-Sleep -Seconds 5
-          if (Test-Path "C:\Program Files\Tailscale\tailscale.exe") {
-              & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
-          } else {
-              tailscale up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
-          }
-
-      # 3. إعداد الـ RDP والمستخدم
-      - name: Enable RDP and Setup User
+      # 3. إعداد ريموت ديسكتوب (RDP) داخل الويندوز للسماح بالاتصال
+      - name: Configure Windows RDP
         shell: powershell
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          $Password = ConvertTo-SecureString "GitHubRDP@2026" -AsPlainText -Force
-          Set-LocalUser -Name "runneradmin" -Password $Password
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+          Write-Host "Windows RDP configuration completed."
 
-      # 4. تثبيت أدواتك وبرامجك تلقائياً (بالإنجليزية لتفادي خطأ الترميز)
+      # 4. تثبيت متصفح كروم وباقي الأدوات
       - name: Auto-Install My Tools & Apps
         shell: powershell
         run: |
           Write-Host "Installing Google Chrome and WinRAR..."
           choco install googlechrome -y
           choco install winrar -y
+          
+          # ملاحظة: تم إزالة تثبيت تطبيق Mysterium كمشغل كامل للجهاز 
+          # لمنع سحب الاتصال من تايل سكيل وفصل الـ RDP.
+          # يفضل تثبيته كـ Extension يدويًا داخل الكروم عند الدخول.
 
-      # 5. الحفاظ على تشغيل السيرفر (5 ساعات و50 دقيقة)
-      - name: Keep Alive Loop
+      # 5. إبقاء السيرفر حياً والانتظار (Loop)
+      - name: Keep RDP Alive Loop
         shell: powershell
         run: |
-          $minutes = 350
-          for ($i = 0; $i -lt $minutes; $i++) {
-              Start-Sleep -Seconds 60
-          }
+          Write-Host "RDP Server is ready. You can connect via Tailscale IP."
+          Write-Host "The session will auto-refresh after 6 hours..."
+          
+          # انتظام الانتظار لمدة 5.5 ساعات قبل بدء خطوات التدوير التلقائي
+          Start-Sleep -Seconds 19800
 
-      # 6. خطوة استدعاء التشغيل القادم تلقائياً
+      # 6. تشغيل الجلسة التالية تلقائياً قبل إغلاق الحالية (Trigger Next Run)
       - name: Trigger Next Run
         shell: powershell
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $repo = "${{ github.repository }}"
           $url = "https://api.github.com/repos/$repo/dispatches"
+          
           $headers = @{
-              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "Authorization" = "Bearer ${{ secrets.GH_PAT_TOKEN }}"
               "Accept"        = "application/vnd.github.v3+json"
           }
+          
           $body = @{
               "event_type" = "rerun_rdp"
           } | ConvertTo-Json
-          Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body$body -ContentType "application/json"
+          
+          # تم تصحيح المسافة هنا قبل $headers وقبل $body
+          Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/json"
+          Write-Host "Triggered next workflow run successfully."
 
-      # 7. [خطوة جديدة] مسح سجل التشغيل الحالي تلقائياً لتنظيف الصفحة
+      # 7. حذف تاريخ الـ Run الحالي للحفاظ على نظافة الـ Repository
       - name: Auto Delete Current Workflow Run
+        if: always()
         shell: powershell
-        if: always() # تعمل دائماً حتى لو حدث خطأ في الخطوات السابقة
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $repo = "${{ github.repository }}"
           $run_id = "${{ github.run_id }}"
           $url = "https://api.github.com/repos/$repo/actions/runs/$run_id"
+          
           $headers = @{
-              "Authorization" = "Bearer $env:GITHUB_TOKEN"
+              "Authorization" = "Bearer ${{ secrets.GH_PAT_TOKEN }}"
               "Accept"        = "application/vnd.github.v3+json"
           }
+          
           Write-Host "Deleting workflow run $run_id to keep history clean..."
-          Invoke-RestMethod -Uri $url -Method Delete -Headers$headers
+          
+          # تم تصحيح المسافة هنا قبل $headers
+          Invoke-RestMethod -Uri $url -Method Delete -Headers $headers
+          Write-Host "Current workflow run deleted."
