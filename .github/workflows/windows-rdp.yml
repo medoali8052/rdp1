@@ -2,9 +2,11 @@ name: Free Windows RDP via Tailscale
 
 on:
   workflow_dispatch:
-  # تم إضافة خيار التشغيل التلقائي عبر الـ API
   repository_dispatch:
     types: [rerun_rdp]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -17,14 +19,23 @@ jobs:
         run: |
           choco install tailscale -y
 
-      # 2. الربط بالشبكة
+      # 2. الربط بالشبكة (تعديل لتفادي خطأ عدم التعرف على المسار)
       - name: Connect to Tailscale Network
         shell: powershell
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
+          # إعادة تحديث مسارات النظام في الجلسة الحالية ليقرأ التثبيت الجديد
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
           Start-Sleep -Seconds 5
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
+          
+          # محاولة التشغيل عبر المسار الافتراضي المحدث أو المباشر
+          if (Test-Path "C:\Program Files\Tailscale\tailscale.exe") {
+              & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
+          } else {
+              tailscale up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
+          }
 
       # 3. إعداد الـ RDP والمستخدم
       - name: Enable RDP and Setup User
@@ -36,7 +47,15 @@ jobs:
           $Password = ConvertTo-SecureString "GitHubRDP@2026" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
 
-      # 4. الحفاظ على تشغيل السيرفر (تم تقليل الوقت إلى 5 ساعات و50 دقيقة لتفادي الإغلاق المفاجئ)
+      # 4. تثبيت أدواتك وبرامجك تلقائياً
+      - name: Auto-Install My Tools & Apps
+        shell: powershell
+        run: |
+          echo "جاري تثبيت البرامج الأساسية تلقائياً..."
+          choco install googlechrome -y
+          choco install winrar -y
+
+      # 5. الحفاظ على تشغيل السيرفر (5 ساعات و50 دقيقة)
       - name: Keep Alive Loop
         shell: powershell
         run: |
@@ -45,7 +64,7 @@ jobs:
               Start-Sleep -Seconds 60
           }
 
-      # 5. خطوة استدعاء التشغيل القادم تلقائياً قبل إغلاق السيرفر الحالي
+      # 6. خطوة استدعاء التشغيل القادم تلقائياً
       - name: Trigger Next Run
         shell: powershell
         env:
