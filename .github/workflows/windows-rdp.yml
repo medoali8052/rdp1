@@ -1,107 +1,41 @@
-name: Windows RDP with Auto-Refresh
+name: Free Windows RDP via Tailscale
 
 on:
   workflow_dispatch:
-  repository_dispatch:
-    types: [rerun_rdp]
 
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 360 # الجلسة ستستمر لمدة 6 ساعات كحد أقصى
+    timeout-minutes: 360
 
     steps:
-      # 1. إعداد البيئة والتحقق من الملفات
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # 2. تثبيت وإعداد شبكة Tailscale والربط التلقائي الصارم بالـ Key الصحيح
-      - name: Connect to Tailscale
+      # 1. تثبيت تايل سكيل عبر مدير حزم ويندوز المدمج (Choco) - سريع ومستقر جداً
+      - name: Install Tailscale via Chocolatey
+        shell: powershell
+        run: |
+          choco install tailscale -y
+      # 2. الربط بالشبكة (انتظار 5 ثوانٍ ليتفعل مسار البرنامج في الويندوز)
+      - name: Connect to Tailscale Network
         shell: powershell
         env:
-          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          Write-Host "Installing Tailscale via Chocolatey..."
-          choco install tailscale -y
-          
-          $env:Path += ";C:\Program Files\Tailscale"
-          
-          Write-Host "Connecting to Tailscale using Auth Key..."
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --accept-routes
-          
-          Write-Host "Tailscale connected successfully!"
-
-      # 3. إعداد ريموت ديسكتوب (RDP) لفتح بدون باسورد وتخطي الـ NLA
-      - name: Configure Windows RDP
+          Start-Sleep -Seconds 5
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTH_KEY --accept-routes
+      # 3. إعداد الـ RDP والمستخدم
+      - name: Enable RDP and Setup User
         shell: powershell
         run: |
-          # تفعيل الريموت ديسكتوب
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           
-          # 1. إيقاف الـ User Authentication (NLA) تمامًا لتخطي طلب الباسورد المسبق
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
-          
-          # 2. إزالة الباسورد الحالي لحساب runneradmin وجعله فارغًا
-          $Password = ConvertTo-SecureString "" -AsPlainText -Force
+          $Password = ConvertTo-SecureString "GitHubRDP@2026" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
-          
-          # 3. تعديل الريجستري للسماح بالدخول بحسابات بدون باسورد (LimitBlankPasswordUse = 0)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Lsa' -name "LimitBlankPasswordUse" -Value 0
-          
-          Write-Host "Windows RDP configured for Passwordless login. Username: runneradmin"
-
-      # 4. تثبيت متصفح كروم وباقي الأدوات
-      - name: Auto-Install My Tools & Apps
+      # 4. الحفاظ على تشغيل السيرفر
+      - name: Keep Alive Loop
         shell: powershell
         run: |
-          Write-Host "Installing Google Chrome and WinRAR..."
-          choco install googlechrome -y
-          choco install winrar -y
-
-      # 5. إبقاء السيرفر حياً والانتظار (Loop)
-      - name: Keep RDP Alive Loop
-        shell: powershell
-        run: |
-          Write-Host "RDP Server is ready. You can connect via Tailscale IP."
-          Write-Host "The session will auto-refresh after 6 hours..."
-          
-          # الانتظار لمدة 5.5 ساعات قبل بدء خطوات التدوير التلقائي
-          Start-Sleep -Seconds 19800
-
-      # 6. تشغيل الجلسة التالية تلقائياً قبل إغلاق الحالية (Trigger Next Run)
-      - name: Trigger Next Run
-        shell: powershell
-        run: |
-          $repo = "${{ github.repository }}"
-          $url = "https://api.github.com/repos/$repo/dispatches"
-          
-          $headers = @{
-              "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
-              "Accept"        = "application/vnd.github.v3+json"
+          $hours = 6
+          for ($i = 0; $i -lt ($hours * 60); $i++) {
+              Start-Sleep -Seconds 60
           }
-          
-          $body = @{
-              "event_type" = "rerun_rdp"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/json"
-          Write-Host "Triggered next workflow run successfully."
-
-      # 7. حذف تاريخ الـ Run الحالي للحفاظ على نظافة الـ Repository
-      - name: Auto Delete Current Workflow Run
-        if: always()
-        shell: powershell
-        run: |
-          $repo = "${{ github.repository }}"
-          $run_id = "${{ github.run_id }}"
-          $url = "https://api.github.com/repos/$repo/actions/runs/$run_id"
-          
-          $headers = @{
-              "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
-              "Accept"        = "application/vnd.github.v3+json"
-          }
-          
-          Write-Host "Deleting workflow run $run_id to keep history clean..."
-          Invoke-RestMethod -Uri $url -Method Delete -Headers $headers
-          Write-Host "Current workflow run deleted."
